@@ -6,9 +6,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { generateClip } = require('./lib/videoGen');
-const { stitchClips, applyTemplateOverlay, mixAudio, reframeOrientation } = require('./lib/ffmpegPipeline');
-const { updateProjectStatus, uploadFinishedVideo } = require('./lib/lovableApi');
+const { generateClip } = require('./videoGen');
+const { stitchClips, applyTemplateOverlay, mixAudio, reframeOrientation } = require('./ffmpegPipeline');
+const { updateProjectStatus, uploadFinishedVideo } = require('./lovableApi');
 
 const app = express();
 
