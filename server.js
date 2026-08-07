@@ -1,47 +1,62 @@
 require('dotenv').config();
 const express = require('express');
+const crypto = require('crypto');
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 const { generateClip } = require('./lib/videoGen');
 const { stitchClips, applyTemplateOverlay, mixAudio, reframeOrientation } = require('./lib/ffmpegPipeline');
-const { uploadFinishedVideo, updateProjectStatus, fetchProject } = require('./lib/storage');
+const { updateProjectStatus, uploadFinishedVideo } = require('./lib/lovableApi');
 
 const app = express();
-app.use(express.json());
 
-// Simple shared-secret auth so only your Supabase Edge Function can call this.
-app.use((req, res, next) => {
-  const token = req.headers['x-service-token'];
-  if (token !== process.env.SERVICE_AUTH_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-});
+// Capture the raw body so we can verify Lovable's signature against the
+// exact bytes they signed (parsed-then-restringified JSON won't match).
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); },
+}));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// Kick off generation. Call this from your Supabase Edge Function right
-// after "Create Project" is clicked, passing just the project ID —
-// this service reads everything else it needs from Supabase directly.
-app.post('/generate-video', async (req, res) => {
-  const { projectId } = req.body;
-  if (!projectId) return res.status(400).json({ error: 'projectId is required' });
+/**
+ * Lovable POSTs here when a user clicks "Create Project".
+ * The payload carries everything needed — we never query the DB ourselves.
+ */
+app.post('/generate-video', (req, res) => {
+  // Verify the request genuinely came from Lovable.
+  const expected = crypto
+    .createHmac('sha256', process.env.RENDER_WEBHOOK_SECRET)
+    .update(req.rawBody || '')
+    .digest('hex');
+  const received = req.headers['x-signature'];
 
-  // Respond immediately — generation takes minutes, don't hold the HTTP request open.
-  res.json({ status: 'started', projectId });
+  if (!received || received !== expected) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
 
-  runPipeline(projectId).catch((err) => {
-    console.error(`Pipeline failed for project ${projectId}:`, err);
-    updateProjectStatus(projectId, { status: 'failed', error_message: err.message }).catch(() => {});
+  const project = req.body;
+  if (!project || !project.projectId) {
+    return res.status(400).json({ error: 'projectId is required' });
+  }
+
+  // Respond immediately — generation takes minutes, don't hold the request open.
+  res.json({ status: 'started', projectId: project.projectId });
+
+  runPipeline(project).catch((err) => {
+    console.error(`Pipeline failed for project ${project.projectId}:`, err);
+    updateProjectStatus(project.projectId, {
+      status: 'failed',
+      errorMessage: err.message,
+    }).catch((e) => console.error('Could not report failure to Lovable:', e.message));
   });
 });
 
-async function runPipeline(projectId) {
+async function runPipeline(project) {
+  const projectId = project.projectId;
   await updateProjectStatus(projectId, { status: 'processing' });
 
-  const project = await fetchProject(projectId);
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), `proj-${projectId}-`));
   const clipsDir = path.join(workDir, 'clips');
   fs.mkdirSync(clipsDir);
@@ -49,9 +64,9 @@ async function runPipeline(projectId) {
   const clipPaths = [];
   const skippedPhotos = [];
 
-  // 1. Generate one clip per photo, in order. Skip failures instead of
-  // aborting the whole project (matches your known bathroom/mirror
-  // moderation issue — one bad photo shouldn't kill the video).
+  // 1. Generate one clip per photo, in order. Skip failures rather than
+  // aborting the whole project (a single moderation rejection on one
+  // photo shouldn't kill the video).
   for (let i = 0; i < project.photos.length; i++) {
     const photo = project.photos[i];
     try {
@@ -70,32 +85,40 @@ async function runPipeline(projectId) {
   }
 
   if (clipPaths.length === 0) {
-    throw new Error('All photos failed generation — nothing to stitch.');
+    throw new Error('All photos failed generation - nothing to stitch.');
   }
 
-  // 2. Stitch clips with crossfade transitions.
+  // 2. Stitch clips together with crossfade transitions.
   const stitchedPath = path.join(workDir, 'stitched.mp4');
   await stitchClips(clipPaths, stitchedPath);
 
-  // 3. Overlay the selected template (dynamic text/icons, not baked images).
+  // 3. Overlay the selected template (dynamic text, not baked images).
   const overlaidPath = path.join(workDir, 'overlaid.mp4');
   await applyTemplateOverlay(stitchedPath, overlaidPath, {
-    style: project.template_style,
-    title: project.template_title,
+    style: project.templateStyle,
+    title: project.templateTitle,
     address: project.address,
     price: project.price,
     beds: project.bedrooms,
     baths: project.bathrooms,
-    cars: project.car_spaces,
-    sizeM2: project.land_size,
-    agentName: project.agent_name,
+    cars: project.carSpaces,
+    sizeM2: project.landSize,
+    agentName: project.agentName,
   });
 
-  // 4. Mix voiceover + background music.
-  const mixedPath = path.join(workDir, 'mixed.mp4');
-  await mixAudio(overlaidPath, project.voiceover_audio_url_local, project.music_track_url_local, mixedPath);
+  // 4. Download the voiceover + music, then mix them in.
+  const voiceoverPath = project.voiceoverUrl
+    ? await downloadToTemp(project.voiceoverUrl, path.join(workDir, 'voiceover.mp3'))
+    : null;
+  const musicPath = project.musicUrl
+    ? await downloadToTemp(project.musicUrl, path.join(workDir, 'music.mp3'))
+    : null;
 
-  // 5. Export in the orientation(s) the user chose, upload each, save URLs.
+  const mixedPath = path.join(workDir, 'mixed.mp4');
+  await mixAudio(overlaidPath, voiceoverPath, musicPath, mixedPath);
+
+  // 5. Export in the orientation(s) chosen, upload each via Lovable's
+  // signed upload endpoint.
   const finalUrls = {};
   const wantsLandscape = project.orientation === 'landscape' || project.orientation === 'both';
   const wantsPortrait = project.orientation === 'portrait' || project.orientation === 'both';
@@ -111,16 +134,25 @@ async function runPipeline(projectId) {
     finalUrls.portrait = await uploadFinishedVideo(portraitPath, projectId, 'portrait');
   }
 
-  // 6. Mark complete. A Supabase DB trigger/webhook on this status change
-  // is what should fire the "your video is ready" email — see README.
+  // 6. Tell Lovable it's done - Lovable sends the completion email.
   await updateProjectStatus(projectId, {
     status: 'ready',
-    final_video_urls: finalUrls,
-    skipped_photos: skippedPhotos,
+    videoUrls: finalUrls,
+    skippedPhotos,
   });
 
-  // Clean up temp files.
   fs.rmSync(workDir, { recursive: true, force: true });
+}
+
+async function downloadToTemp(url, outputPath) {
+  const writer = fs.createWriteStream(outputPath);
+  const response = await axios.get(url, { responseType: 'stream' });
+  response.data.pipe(writer);
+  await new Promise((resolve, reject) => {
+    writer.on('finish', resolve);
+    writer.on('error', reject);
+  });
+  return outputPath;
 }
 
 const PORT = process.env.PORT || 8080;

@@ -1,15 +1,13 @@
 {
   "name": "property-video-service",
   "version": "1.0.0",
-  "description": "Standalone service: takes a project's photos + settings, generates AI video clips, stitches them with FFmpeg, overlays the template, mixes audio, and uploads the finished video to Supabase Storage.",
+  "description": "Receives project data from Lovable, generates AI video clips, stitches them with FFmpeg, overlays the template, mixes audio, and returns the finished video.",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
     "axios": "^1.7.0",
     "dotenv": "^16.4.0",
     "express": "^4.19.0"
