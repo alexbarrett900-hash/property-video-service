@@ -1,0 +1,20 @@
+{
+  "name": "property-video-service",
+  "version": "1.0.0",
+  "description": "Standalone service: takes a project's photos + settings, generates AI video clips, stitches them with FFmpeg, overlays the template, mixes audio, and uploads the finished video to Supabase Storage.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
