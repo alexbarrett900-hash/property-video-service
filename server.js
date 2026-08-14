@@ -30,7 +30,8 @@ app.post('/generate-video', (req, res) => {
     .createHmac('sha256', process.env.RENDER_WEBHOOK_SECRET)
     .update(req.rawBody || '')
     .digest('hex');
-  const received = req.headers['x-signature'];
+  const rawSig = req.headers['x-reelty-signature']  req.headers['x-signature']  '';
+  const received = rawSig.startsWith('sha256=') ? rawSig.slice(7) : rawSig;
 
   if (!received || received !== expected) {
     return res.status(401).json({ error: 'Invalid signature' });
