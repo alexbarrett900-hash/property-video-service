@@ -30,7 +30,9 @@ app.post('/generate-video', (req, res) => {
     .createHmac('sha256', process.env.RENDER_WEBHOOK_SECRET)
     .update(req.rawBody || '')
     .digest('hex');
-  const rawSig = req.headers['x-reelty-signature']  req.headers['x-signature']  '';
+  let rawSig = req.headers['x-reelty-signature'];
+  if (!rawSig) rawSig = req.headers['x-signature'];
+  if (!rawSig) rawSig = '';
   const received = rawSig.startsWith('sha256=') ? rawSig.slice(7) : rawSig;
 
   if (!received || received !== expected) {
