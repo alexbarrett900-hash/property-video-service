@@ -24,6 +24,7 @@ app.get('/health', (req, res) => res.json({ ok: true }));
  * Lovable POSTs here when a user clicks "Create Project".
  * The payload carries everything needed — we never query the DB ourselves.
  */
+app.post('/generate-video', (req, res) => {
 console.log('HIT generate-video');
   // Verify the request genuinely came from Lovable.
   const expected = crypto
