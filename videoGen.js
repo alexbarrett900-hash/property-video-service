@@ -25,7 +25,7 @@ function buildPrompt(photoSettings) {
   const actors = photoSettings.aiActors
     ? ' Include a natural, realistic person or family lightly present in the scene.'
     : '';
-  return Cinematic real estate walkthrough shot. ${base}.${staging}${actors};
+  return 'Cinematic real estate walkthrough shot. ' + base + '.' + staging + actors;
 }
 
 async function generateClip({ photoUrl, photoSettings, orientation, outputDir, index }) {
@@ -40,13 +40,13 @@ async function generateClip({ photoUrl, photoSettings, orientation, outputDir, i
   } else if (provider === 'wavespeed') {
     resultVideoUrl = await generateWithWavespeed({ photoUrl, prompt, negativePrompt: NEGATIVE_PROMPT, aspectRatio, duration: GENERATED_DURATION_SECONDS });
   } else {
-    throw new Error(`Unknown VIDEO_PROVIDER: ${provider}`);
+    throw new Error('Unknown VIDEO_PROVIDER: ' + provider);
   }
 
-  const rawPath = path.join(outputDir, `clip-${index}-raw.mp4`);
+  const rawPath = path.join(outputDir, 'clip-' + index + '-raw.mp4');
   await downloadFile(resultVideoUrl, rawPath);
 
-  const trimmedPath = path.join(outputDir, `clip-${index}.mp4`);
+  const trimmedPath = path.join(outputDir, 'clip-' + index + '.mp4');
   await trimClip(rawPath, trimmedPath, TARGET_DURATION_SECONDS);
 
   return trimmedPath;
@@ -56,7 +56,7 @@ async function trimClip(inputPath, outputPath, targetSeconds) {
   const { exec } = require('child_process');
   const util = require('util');
   const execAsync = util.promisify(exec);
-[15/08/2026 20:38] Maya Snow: const cmd = ffmpeg -y -i "${inputPath}" -t ${targetSeconds} -c:v libx264 -pix_fmt yuv420p -c:a aac "${outputPath}";
+  const cmd = 'ffmpeg -y -i "' + inputPath + '" -t ' + targetSeconds + ' -c:v libx264 -pix_fmt yuv420p -c:a aac "' + outputPath + '"';
   await execAsync(cmd, { maxBuffer: 1024 * 1024 * 50 });
   return outputPath;
 }
@@ -71,7 +71,7 @@ async function generateWithFal({ photoUrl, prompt, negativePrompt, aspectRatio, 
       duration: String(duration),
       generate_audio: false,
     },
-    { headers: { Authorization: Key ${process.env.FAL_API_KEY} } }
+    { headers: { Authorization: 'Key ' + process.env.FAL_API_KEY } }
   );
 
   const statusUrl = submitRes.data.status_url;
@@ -81,7 +81,7 @@ async function generateWithFal({ photoUrl, prompt, negativePrompt, aspectRatio, 
   while (!done) {
     await sleep(4000);
     const statusRes = await axios.get(statusUrl, {
-      headers: { Authorization: Key ${process.env.FAL_API_KEY} },
+      headers: { Authorization: 'Key ' + process.env.FAL_API_KEY },
     });
     if (statusRes.data.status === 'COMPLETED') done = true;
     if (statusRes.data.status === 'FAILED') {
@@ -90,7 +90,7 @@ async function generateWithFal({ photoUrl, prompt, negativePrompt, aspectRatio, 
   }
 
   const finalRes = await axios.get(responseUrl, {
-    headers: { Authorization: Key ${process.env.FAL_API_KEY} },
+    headers: { Authorization: 'Key ' + process.env.FAL_API_KEY },
   });
   return finalRes.data.video.url;
 }
@@ -99,7 +99,7 @@ async function generateWithWavespeed({ photoUrl, prompt, negativePrompt, aspectR
   const submitRes = await axios.post(
     'https://api.wavespeed.ai/v1/video/generate',
     { image_url: photoUrl, prompt, negative_prompt: negativePrompt, aspect_ratio: aspectRatio, duration },
-    { headers: { Authorization: Bearer ${process.env.WAVESPEED_API_KEY} } }
+    { headers: { Authorization: 'Bearer ' + process.env.WAVESPEED_API_KEY } }
   );
 
   const jobId = submitRes.data.id;
@@ -108,8 +108,8 @@ async function generateWithWavespeed({ photoUrl, prompt, negativePrompt, aspectR
   while (!done) {
     await sleep(4000);
     const statusRes = await axios.get(
-      https://api.wavespeed.ai/v1/video/status/${jobId},
-      { headers: { Authorization: Bearer ${process.env.WAVESPEED_API_KEY} } }
+      'https://api.wavespeed.ai/v1/video/status/' + jobId,
+      { headers: { Authorization: 'Bearer ' + process.env.WAVESPEED_API_KEY } }
     );
     if (statusRes.data.status === 'completed') {
       done = true;
