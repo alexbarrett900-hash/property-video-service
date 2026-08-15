@@ -10,6 +10,13 @@ const { generateClip } = require('./videoGen');
 const { stitchClips, applyTemplateOverlay, mixAudio, reframeOrientation } = require('./ffmpegPipeline');
 const { updateProjectStatus, uploadFinishedVideo } = require('./lovableApi');
 
+process.on('uncaughtException', function (err) {
+  console.error('UNCAUGHT EXCEPTION:', err);
+});
+process.on('unhandledRejection', function (err) {
+  console.error('UNHANDLED REJECTION:', err);
+});
+
 const app = express();
 
 // Capture the raw body so we can verify Lovable's signature against the
