@@ -74,19 +74,29 @@ async function stitchClips(clipPaths, outputPath, options) {
 
 async function applyTemplateOverlay(inputPath, outputPath, templateData) {
   const d = templateData || {};
+  console.log('TEMPLATE DATA:', JSON.stringify(d));
+  const p = d.property || {};
+  const ag = d.agent || {};
   const total = await getDuration(inputPath);
   const slot = total / 5;
   const fade = Math.min(0.6, slot * 0.25);
   const pad = slot * 0.08;
 
-  const street = d.address || d.streetAddress || '';
-  const cityLine = [d.suburb || d.city, d.state].filter(Boolean).join(', ');
-  const sizeText = d.landSize ? String(d.landSize) + ' ' + (d.landSizeUnit || 'm2') : '';
+  const street = d.address || d.streetAddress || p.streetAddress || p.address || '';
+  const cityLine = [d.suburb || d.city || p.suburb || p.city, d.state || p.state].filter(Boolean).join(', ');
+  const rawSize = d.landSize || p.landSize;
+  const sizeText = rawSize ? String(rawSize) + ' ' + (d.landSizeUnit || p.landSizeUnit || 'm2') : '';
   const locationSecond = [cityLine, sizeText].filter(Boolean).join('  -  ');
-  const stats = statsLine(d.beds, d.baths, d.cars);
-  const agentName = d.agentName || '';
-  const agency = d.agency || '';
-  const price = d.price ? String(d.price) : '';
+
+  const beds = d.beds != null ? d.beds : (p.bedrooms != null ? p.bedrooms : p.beds);
+  const baths = d.baths != null ? d.baths : (p.bathrooms != null ? p.bathrooms : p.baths);
+  const cars = d.cars != null ? d.cars : (p.carSpaces != null ? p.carSpaces : p.cars);
+  const stats = statsLine(beds, baths, cars);
+
+  const agentName = d.agentName || ag.name || '';
+  const agency = d.agency || ag.agency || '';
+  const rawPrice = d.price || p.price;
+  const price = rawPrice ? String(rawPrice) : '';
 
   const layers = [];
 
