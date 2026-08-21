@@ -3,6 +3,34 @@ const util = require('util');
 const path = require('path');
 const execAsync = util.promisify(exec);
 
+const FONT_BOLD = path.join(__dirname, 'PlusJakartaSans-Bold.ttf');
+const FONT_REG = path.join(__dirname, 'PlusJakartaSans-Regular.ttf');
+
+async function getDuration(filePath) {
+  const cmd = 'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "' + filePath + '"';
+  const res = await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 });
+  const seconds = parseFloat(String(res.stdout).trim());
+  if (!seconds || isNaN(seconds)) return 20;
+  return seconds;
+}
+
+function fadeAlpha(start, end, fade) {
+  const a = start.toFixed(2);
+  const b = (start + fade).toFixed(2);
+  const c = (end - fade).toFixed(2);
+  const d = end.toFixed(2);
+  const f = fade.toFixed(2);
+  return "if(lt(t," + a + "),0,if(lt(t," + b + "),(t-" + a + ")/" + f +
+    ",if(lt(t," + c + "),1,if(lt(t," + d + "),(" + d + "-t)/" + f + ",0))))";
+}
+
+function textLayer(fontFile, text, size, yExpr, alphaExpr) {
+  if (!text) return null;
+  return "drawtext=fontfile='" + fontFile + "':text='" + escapeText(text) +
+    "':fontcolor=white:fontsize=" + size + ":x=(w-tw)/2:y=" + yExpr +
+    ":shadowcolor=black@0.6:shadowx=2:shadowy=2:alpha='" + alphaExpr + "'";
+}
+
 async function stitchClips(clipPaths, outputPath, options) {
   options = options || {};
   const transitionDuration = options.transitionDuration || 0.6;
@@ -16,8 +44,6 @@ async function stitchClips(clipPaths, outputPath, options) {
 
   const inputs = clipPaths.map(function (p) { return '-i "' + p + '"'; }).join(' ');
 
-  // Normalise every clip first: same size, same pixel aspect, same fps.
-  // xfade refuses to run unless all inputs match exactly.
   let filterChain = '';
   for (let i = 0; i < clipPaths.length; i++) {
     filterChain +=
@@ -47,46 +73,65 @@ async function stitchClips(clipPaths, outputPath, options) {
 }
 
 async function applyTemplateOverlay(inputPath, outputPath, templateData) {
-  const style = templateData.style;
-  const address = templateData.address;
-  const price = templateData.price;
-  const beds = templateData.beds;
-  const baths = templateData.baths;
-  const cars = templateData.cars;
-  const sizeM2 = templateData.sizeM2;
+  const d = templateData || {};
+  const total = await getDuration(inputPath);
+  const slot = total / 5;
+  const fade = Math.min(0.6, slot * 0.25);
+  const pad = slot * 0.08;
 
-  let drawtextFilters;
-  switch (style) {
-    case 'bold-banner':
-      drawtextFilters = [
-        'drawbox=x=0:y=ih-160:w=iw:h=160:color=black@0.55:t=fill',
-        "drawtext=text='" + escapeText(templateData.title || 'JUST LISTED') + "':fontcolor=white:fontsize=48:x=40:y=h-140",
-        "drawtext=text='" + escapeText(address) + "':fontcolor=white:fontsize=24:x=40:y=h-70",
-        "drawtext=text='" + escapeText(statsLine(beds, baths, cars, sizeM2)) + "':fontcolor=white:fontsize=24:x=w-tw-40:y=h-70",
-      ].join(',');
-      break;
-    case 'minimal-focus':
-      drawtextFilters = [
-        "drawtext=text='" + escapeText(templateData.title || 'LISTED FOR SALE') + "':fontcolor=white:fontsize=32:x=(w-tw)/2:y=(h/2)-40:box=1:boxcolor=black@0.5:boxborderw=10",
-        "drawtext=text='" + escapeText(address) + "':fontcolor=white:fontsize=20:x=(w-tw)/2:y=(h/2)+20:box=1:boxcolor=black@0.4:boxborderw=8",
-      ].join(',');
-      break;
-    case 'modern-luxe':
-      drawtextFilters = [
-        "drawtext=text='" + escapeText(templateData.title || 'Just Listed') + "':fontcolor=white:fontsize=56:x=(w-tw)/2:y=(h/2)-80",
-        "drawtext=text='" + escapeText(address) + "':fontcolor=white:fontsize=22:x=(w-tw)/2:y=(h/2)-10",
-        "drawtext=text='" + escapeText(statsLine(beds, baths, cars, sizeM2)) + '    ' + escapeText(price || '') + "':fontcolor=white:fontsize=22:x=(w-tw)/2:y=(h/2)+40",
-      ].join(',');
-      break;
-    default:
-      drawtextFilters = [
-        "drawtext=text='" + escapeText(templateData.title || 'Just Listed') + "':fontcolor=white:fontsize=52:x=(w-tw)/2:y=(h/2)-60",
-        "drawtext=text='" + escapeText(address) + "':fontcolor=white:fontsize=20:x=(w-tw)/2:y=(h/2)+10",
-        "drawtext=text='" + escapeText(statsLine(beds, baths, cars, sizeM2)) + "':fontcolor=white:fontsize=18:x=(w-tw)/2:y=(h/2)+50:box=1:boxcolor=black@0.4:boxborderw=6",
-      ].join(',');
+  const street = d.address || d.streetAddress || '';
+  const cityLine = [d.suburb || d.city, d.state].filter(Boolean).join(', ');
+  const sizeText = d.landSize ? String(d.landSize) + ' ' + (d.landSizeUnit || 'm2') : '';
+  const locationSecond = [cityLine, sizeText].filter(Boolean).join('  -  ');
+  const stats = statsLine(d.beds, d.baths, d.cars);
+  const agentName = d.agentName || '';
+  const agency = d.agency || '';
+  const price = d.price ? String(d.price) : '';
+
+  const layers = [];
+
+  function slotRange(i) {
+    return { s: i * slot + pad, e: (i + 1) * slot - pad };
   }
 
-  const cmd = 'ffmpeg -y -i "' + inputPath + '" -vf "' + drawtextFilters + '" -codec:a copy "' + outputPath + '"';
+  // 1 - headline
+  let r = slotRange(0);
+  let a = fadeAlpha(r.s, r.e, fade);
+  layers.push(textLayer(FONT_BOLD, (d.title || 'JUST LISTED').toUpperCase(), 'h/16', 'h*0.44', a));
+  layers.push("drawbox=x=w*0.28:y=h*0.44+h/16*1.5:w=w*0.44:h=2:color=white@0.85:t=fill:enable='between(t," +
+    r.s.toFixed(2) + "," + r.e.toFixed(2) + ")'");
+
+  // 2 - location
+  r = slotRange(1);
+  a = fadeAlpha(r.s, r.e, fade);
+  layers.push(textLayer(FONT_BOLD, street, 'h/26', 'h*0.45', a));
+  layers.push(textLayer(FONT_REG, locationSecond, 'h/38', 'h*0.52', a));
+
+  // 3 - stats
+  r = slotRange(2);
+  a = fadeAlpha(r.s, r.e, fade);
+  layers.push(textLayer(FONT_REG, stats, 'h/28', 'h*0.47', a));
+
+  // 4 - agent
+  r = slotRange(3);
+  a = fadeAlpha(r.s, r.e, fade);
+  layers.push(textLayer(FONT_BOLD, agentName, 'h/28', 'h*0.45', a));
+  layers.push(textLayer(FONT_REG, agency, 'h/38', 'h*0.52', a));
+
+  // 5 - price
+  r = slotRange(4);
+  a = fadeAlpha(r.s, r.e, fade);
+  layers.push(textLayer(FONT_BOLD, price, 'h/18', 'h*0.46', a));
+
+  const filters = layers.filter(Boolean).join(',');
+
+  if (!filters) {
+    await execAsync('cp "' + inputPath + '" "' + outputPath + '"');
+    return outputPath;
+  }
+
+  const cmd = 'ffmpeg -y -i "' + inputPath + '" -vf "' + filters +
+    '" -c:v libx264 -pix_fmt yuv420p -c:a copy "' + outputPath + '"';
   await execAsync(cmd, { maxBuffer: 1024 * 1024 * 50 });
   return outputPath;
 }
@@ -121,18 +166,17 @@ async function reframeOrientation(inputPath, outputPath, targetOrientation) {
   return outputPath;
 }
 
-function statsLine(beds, baths, cars, sizeM2) {
+function statsLine(beds, baths, cars) {
   const parts = [];
   if (beds != null) parts.push(beds + ' bed');
   if (baths != null) parts.push(baths + ' bath');
   if (cars != null) parts.push(cars + ' car');
-  if (sizeM2 != null) parts.push(sizeM2 + 'm2');
-  return parts.join(' - ');
+  return parts.join('   -   ');
 }
 
 function escapeText(str) {
   if (str == null) str = '';
-  return String(str).replace(/'/g, "\\'").replace(/:/g, '\\:');
+  return String(str).replace(/\\/g, '').replace(/'/g, '').replace(/:/g, '\\:').replace(/%/g, '');
 }
 
 module.exports = {
