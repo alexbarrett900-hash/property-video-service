@@ -98,7 +98,7 @@ async function applyTemplateOverlay(inputPath, outputPath, templateData) {
   let r = slotRange(0);
   let a = fadeAlpha(r.s, r.e, fade);
   layers.push(textLayer(FONT_BOLD, (d.title || 'JUST LISTED').toUpperCase(), 'h/16', 'h*0.44', a));
-  layers.push("drawbox=x=w*0.28:y=h*0.44+h/16*1.5:w=w*0.44:h=2:color=white@0.85:t=fill:enable='between(t," +
+  layers.push("drawbox=x=iw*0.28:y=ih*0.44+ih/16*1.5:w=iw*0.44:h=2:color=white@0.85:t=fill:enable='between(t," +
     r.s.toFixed(2) + "," + r.e.toFixed(2) + ")'");
 
   // 2 - location
